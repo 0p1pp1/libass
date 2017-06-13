@@ -528,6 +528,7 @@ static int process_style(ASS_Track *track, char *str)
             // this will destroy SSA's TertiaryColour, but i'm not going to use it anyway
             if (track->track_type == TRACK_TYPE_SSA)
                 target->OutlineColour = target->BackColour;
+            COLORVAL(ClippingColour)
             FPVAL(FontSize)
             INTVAL(Bold)
             INTVAL(Italic)
