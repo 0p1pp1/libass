@@ -238,7 +238,7 @@ typedef struct {
     int border_style;
     double border_x;            // outline width
     double border_y;
-    uint32_t c[4];              // colors(Primary, Secondary, so on) in RGBA
+    uint32_t c[5];              // colors(Primary, Secondary, so on) in RGBA
     int clip_x0, clip_y0, clip_x1, clip_y1;
     char clip_mode;             // 1 = iclip
     char detect_collisions;

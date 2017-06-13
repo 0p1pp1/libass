@@ -833,6 +833,7 @@ void reset_render_context(ASS_Renderer *render_priv, ASS_Style *style)
     render_priv->state.c[1] = style->SecondaryColour;
     render_priv->state.c[2] = style->OutlineColour;
     render_priv->state.c[3] = style->BackColour;
+    render_priv->state.c[4] = style->ClippingColour ? style->ClippingColour : 0xFF;
     render_priv->state.flags =
         (style->Underline ? DECO_UNDERLINE : 0) |
         (style->StrikeOut ? DECO_STRIKETHROUGH : 0);
@@ -2430,6 +2431,39 @@ static void add_background(ASS_Renderer *render_priv, EventImages *event_images)
     }
 }
 
+static void add_clipping_mat(ASS_Renderer *render_priv, EventImages *event_images)
+{
+    int w, h;
+    ASS_Image *img;
+    void *nbuffer;
+
+    if (!event_images->imgs ||
+        event_images->imgs->w < 1 || event_images->imgs->h < 1)
+        return;
+
+    w = render_priv->state.clip_x1 - render_priv->state.clip_x0;
+    h = render_priv->state.clip_y1 - render_priv->state.clip_y0;
+
+    if (w < 1 || h < 1)
+        return;
+    nbuffer = ass_aligned_alloc(1, w * h, false);
+    if (!nbuffer)
+        return;
+    memset(nbuffer, 0xFF, w * h);
+
+    img = my_draw_bitmap(nbuffer, w, h, w,
+                         render_priv->state.clip_x0, render_priv->state.clip_y0,
+                         render_priv->state.c[4], NULL);
+    if (!img)
+        return;
+
+    img->next = event_images->imgs;
+    event_images->imgs = img;
+    ass_msg(render_priv->library, MSGL_DBG2,
+            "clipping area mat at (%d, %d), size (%d, %d) col:0x%08X",
+            img->dst_x, img->dst_y, img->w, img->h, img->color);
+}
+
 /**
  * \brief Main ass rendering function, glues everything together
  * \param event event to render
@@ -2662,6 +2696,11 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
 
     if (render_priv->state.border_style == 4)
         add_background(render_priv, event_images);
+
+    // add a mat image of clipping area
+    if (_a(render_priv->state.c[4]) != 0xFF &&
+        render_priv->state.clip_mode == 0)
+        add_clipping_mat(render_priv, event_images);
 
     ass_shaper_cleanup(render_priv->shaper, text_info);
     free_render_context(render_priv);

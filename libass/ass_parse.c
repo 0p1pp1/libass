@@ -736,6 +736,13 @@ char *parse_tag(ASS_Renderer *render_priv, char *p, char *end, double pwr)
         } else
             change_color(&render_priv->state.c[3],
                          render_priv->state.style->BackColour, 1);
+    } else if (tag("5c")) {
+        if (nargs) {
+            uint32_t val = parse_color_tag(args->start);
+            change_color(&render_priv->state.c[4], val, pwr);
+        } else
+            change_color(&render_priv->state.c[4],
+                         render_priv->state.style->ClippingColour, 1);
     } else if (tag("1a")) {
         if (nargs) {
             uint32_t val = parse_alpha_tag(args->start);
@@ -764,6 +771,13 @@ char *parse_tag(ASS_Renderer *render_priv, char *p, char *end, double pwr)
         } else
             change_alpha(&render_priv->state.c[3],
                          _a(render_priv->state.style->BackColour), 1);
+    } else if (tag("5a")) {
+        if (nargs) {
+            uint32_t val = parse_alpha_tag(args->start);
+            change_alpha(&render_priv->state.c[4], val, pwr);
+        } else
+            change_alpha(&render_priv->state.c[4],
+                         _a(render_priv->state.style->ClippingColour), 1);
     } else if (tag("r")) {
         if (nargs) {
             int len = args->end - args->start;
