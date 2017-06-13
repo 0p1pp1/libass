@@ -35,6 +35,8 @@
 #define SUBPIXEL_MASK 63
 #define SUBPIXEL_ACCURACY 7
 
+#define MPEGTS_MAXTS_MS (((2LL << 33) + 89) / 90)
+
 
 ASS_Renderer *ass_renderer_init(ASS_Library *library)
 {
@@ -3041,8 +3043,12 @@ ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
     cnt = 0;
     for (i = 0; i < track->n_events; ++i) {
         ASS_Event *event = track->events + i;
-        if ((event->Start <= now)
-            && (now < (event->Start + event->Duration))) {
+        long long end = event->Start + event->Duration;
+        // "now" might be roll-overd in mpeg TS
+        if ((event->Start <= now && now < end)
+            || (event->Start > now + MPEGTS_MAXTS_MS / 2
+                && end > MPEGTS_MAXTS_MS
+                && now + MPEGTS_MAXTS_MS < end)) {
             if (cnt >= priv->eimg_size) {
                 priv->eimg_size += 100;
                 priv->eimg =
