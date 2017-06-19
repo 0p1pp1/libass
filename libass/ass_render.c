@@ -209,6 +209,59 @@ static double x2scr_scaled(ASS_Renderer *render_priv, double x)
         render_priv->track->PlayResX +
         FFMAX(render_priv->settings.left_margin, 0);
 }
+
+static double x2scr_left(ASS_Renderer *render_priv, double x)
+{
+    if (render_priv->state.explicit)
+        return x2scr_pos(render_priv, x);
+    if (render_priv->settings.use_margins)
+        return x * render_priv->orig_width_nocrop / render_priv->font_scale_x /
+            render_priv->track->PlayResX;
+    else
+        return x2scr(render_priv, x);
+}
+
+static double x2scr_left_scaled(ASS_Renderer *render_priv, double x)
+{
+    if (render_priv->state.explicit)
+        return x2scr_pos(render_priv, x);
+    if (render_priv->settings.use_margins)
+        return x * render_priv->orig_width_nocrop /
+            render_priv->track->PlayResX;
+    else
+        return x2scr_scaled(render_priv, x);
+}
+
+static double x2scr_right(ASS_Renderer *render_priv, double x)
+{
+    if (render_priv->state.explicit)
+        return x2scr_pos(render_priv, x);
+    if (render_priv->settings.use_margins)
+        return x * render_priv->orig_width_nocrop / render_priv->font_scale_x /
+            render_priv->track->PlayResX +
+            FFMAX(render_priv->settings.left_margin, 0)
+            + FFMAX(render_priv->settings.right_margin, 0);
+    else
+        return x * render_priv->orig_width_nocrop / render_priv->font_scale_x /
+            render_priv->track->PlayResX +
+            FFMAX(render_priv->settings.left_margin, 0);
+}
+
+static double x2scr_right_scaled(ASS_Renderer *render_priv, double x)
+{
+    if (render_priv->state.explicit)
+        return x2scr_pos(render_priv, x);
+    if (render_priv->settings.use_margins)
+        return x * render_priv->orig_width_nocrop /
+            render_priv->track->PlayResX +
+            FFMAX(render_priv->settings.left_margin, 0)
+            + FFMAX(render_priv->settings.right_margin, 0);
+    else
+        return x * render_priv->orig_width_nocrop /
+            render_priv->track->PlayResX +
+            FFMAX(render_priv->settings.left_margin, 0);
+}
+
 /**
  * \brief Mapping between script and screen coordinates
  */
@@ -666,15 +719,30 @@ static ASS_Image *render_text(ASS_Renderer *render_priv)
 
 static void compute_string_bbox(TextInfo *text, ASS_DRect *bbox)
 {
+    int vertical = text->length > 0 && text->glyphs[0].font->desc.vertical;
+
     if (text->length > 0) {
         bbox->x_min = +32000;
         bbox->x_max = -32000;
         bbox->y_min = d6_to_double(text->glyphs[0].pos.y) - text->lines[0].asc;
         bbox->y_max = bbox->y_min + text->height;
+        if (vertical) {
+            bbox->y_min = +32000;
+            bbox->y_max = -32000;
+            bbox->x_max = d6_to_double(text->glyphs[0].pos.x) + text->lines[0].asc;
+            bbox->x_min = bbox->x_max - text->height;
+        }
 
         for (int i = 0; i < text->length; i++) {
             GlyphInfo *info = text->glyphs + i;
             if (info->skip) continue;
+            if (vertical) {
+                double s = d6_to_double(info->pos.y);
+                double e = s + d6_to_double(info->cluster_advance.y);
+                bbox->y_min = FFMIN(bbox->y_min, s);
+                bbox->y_max = FFMAX(bbox->y_max, e);
+                continue;
+            }
             double s = d6_to_double(info->pos.x);
             double e = s + d6_to_double(info->cluster_advance.x);
             bbox->x_min = FFMIN(bbox->x_min, s);
@@ -923,6 +991,7 @@ static void draw_opaque_box(ASS_Renderer *render_priv, GlyphInfo *info,
     int adv = advance.x;
     double scale_y = info->orig_scale_y;
     double scale_x = info->orig_scale_x;
+    int vertical = render_priv->state.font->desc.vertical;
 
     // to avoid gaps
     sx = FFMAX(64, sx);
@@ -950,6 +1019,20 @@ static void draw_opaque_box(ASS_Renderer *render_priv, GlyphInfo *info,
         OUTLINE_LINE_SEGMENT,
         OUTLINE_LINE_SEGMENT | OUTLINE_CONTOUR_END
     };
+
+    if (vertical) {
+        adv = advance.y;
+        adv += double_to_d6(info->hspacing *
+                            render_priv->font_scale * scale_y);
+        adv *= scale_y;
+        desc *= scale_x;
+        asc *= scale_x;
+
+        points[0].x = -desc - sx;  points[0].y = -sy;
+        points[1].x = asc + sx;    points[1].y = -sy;
+        points[2].x = asc + sx;    points[2].y = adv + sy;
+        points[3].x = -desc - sx;  points[3].y = adv + sy;
+    }
 
     ol->n_points = ol->n_segments = 0;
     if (!outline_alloc(ol, 4, 4))
@@ -1070,8 +1153,13 @@ get_outline_glyph(ASS_Renderer *priv, GlyphInfo *info)
                 FT_Done_Glyph(glyph);
                 ass_font_get_asc_desc(info->font, info->symbol,
                                       &val->asc, &val->desc);
-                val->asc  *= info->scale_y;
-                val->desc *= info->scale_y;
+                if (info->font->desc.vertical) {
+                    val->asc  *= info->scale_x;
+                    val->desc *= info->scale_x;
+                } else {
+                    val->asc  *= info->scale_y;
+                    val->desc *= info->scale_y;
+                }
             }
         }
         val->valid = true;
@@ -1406,6 +1494,7 @@ wrap_lines_smart(ASS_Renderer *render_priv, double max_text_width)
     double pen_shift_y;
     int cur_line;
     TextInfo *text_info = &render_priv->text_info;
+    int vertical = render_priv->state.font->desc.vertical;
 
     last_space = -1;
     text_info->n_lines = 1;
@@ -1415,8 +1504,13 @@ wrap_lines_smart(ASS_Renderer *render_priv, double max_text_width)
         int break_at = -1;
         double s_offset, len;
         cur = text_info->glyphs + i;
-        s_offset = d6_to_double(s1->bbox.x_min + s1->pos.x);
-        len = d6_to_double(cur->bbox.x_max + cur->pos.x) - s_offset;
+        if (vertical) {
+            s_offset = d6_to_double(- s1->bbox.y_max + s1->pos.y);
+            len = d6_to_double(- cur->bbox.y_min + cur->pos.y) - s_offset;
+        } else {
+            s_offset = d6_to_double(s1->bbox.x_min + s1->pos.x);
+            len = d6_to_double(cur->bbox.x_max + cur->pos.x) - s_offset;
+        }
 
         if (cur->symbol == '\n') {
             break_type = 2;
@@ -1428,7 +1522,7 @@ wrap_lines_smart(ASS_Renderer *render_priv, double max_text_width)
         } else if (len >= max_text_width
                    && (render_priv->state.wrap_style != 2)) {
             break_type = 1;
-            break_at = last_space;
+            break_at = last_space != -1 ? last_space : i - 1;
             if (break_at >= 0)
                 ass_msg(render_priv->library, MSGL_DBG2, "line break at %d",
                         break_at);
@@ -1492,6 +1586,16 @@ wrap_lines_smart(ASS_Renderer *render_priv, double max_text_width)
                     l2_new = d6_to_double(
                         ((s3 - 1)->bbox.x_max + (s3 - 1)->pos.x) -
                         (w->bbox.x_min + w->pos.x));
+                    if (vertical) {
+                        l1 = d6_to_double(((s2 - 1)->pos.y - (s2 - 1)->bbox.y_min)
+                                - (s1->pos.y - s1->bbox.y_max));
+                        l2 = d6_to_double(((s3 - 1)->pos.y - (s3 - 1)->bbox.y_min)
+                                - (s2->pos.y - s2->bbox.y_max));
+                        l1_new = d6_to_double((e1->pos.y - e1->bbox.y_min) -
+                                (s1->pos.y - s1->bbox.y_max));
+                        l2_new = d6_to_double(((s3 - 1)->pos.y - (s3 - 1)->bbox.y_min)
+                                - (w->pos.y - w->bbox.y_max));
+                    }
 
                     if (DIFF(l1_new, l2_new) < DIFF(l1, l2)) {
                         if (w->linebreak || w == text_info->glyphs)
@@ -1520,8 +1624,11 @@ wrap_lines_smart(ASS_Renderer *render_priv, double max_text_width)
     cur = text_info->glyphs + i;
     while (i < text_info->length && cur->skip)
         cur = text_info->glyphs + ++i;
-    pen_shift_x = d6_to_double(-cur->pos.x);
-    pen_shift_y = 0.;
+    pen_shift_x = pen_shift_y = 0.;
+    if (vertical)
+        pen_shift_y = d6_to_double(-cur->pos.y);
+    else
+        pen_shift_x = d6_to_double(-cur->pos.x);
 
     for (i = 0; i < text_info->length; ++i) {
         cur = text_info->glyphs + i;
@@ -1535,8 +1642,13 @@ wrap_lines_smart(ASS_Renderer *render_priv, double max_text_width)
                 text_info->lines[cur_line - 1].offset;
             text_info->lines[cur_line].offset = i;
             cur_line++;
-            pen_shift_x = d6_to_double(-cur->pos.x);
-            pen_shift_y += height + render_priv->settings.line_spacing;
+            if (vertical) {
+                pen_shift_y = d6_to_double(-cur->pos.y);
+                pen_shift_x = -(height + text_info->lines[cur_line - 2].lspacing);
+            } else {
+                pen_shift_x = d6_to_double(-cur->pos.x);
+                pen_shift_y = height + text_info->lines[cur_line - 2].lspacing;
+            }
         }
         cur->pos.x += double_to_d6(pen_shift_x);
         cur->pos.y += double_to_d6(pen_shift_y);
@@ -1840,6 +1952,7 @@ static void retrieve_glyphs(ASS_Renderer *render_priv)
 {
     GlyphInfo *glyphs = render_priv->text_info.glyphs;
     int i;
+    int vertical = render_priv->state.font->desc.vertical;
 
     for (i = 0; i < render_priv->text_info.length; i++) {
         GlyphInfo *info = glyphs + i;
@@ -1850,7 +1963,7 @@ static void retrieve_glyphs(ASS_Renderer *render_priv)
         info = glyphs + i;
 
         // Add additional space after italic to non-italic style changes
-        if (i && glyphs[i - 1].italic && !info->italic) {
+        if (i && glyphs[i - 1].italic && !info->italic && !vertical) {
             int back = i - 1;
             GlyphInfo *og = &glyphs[back];
             while (back && og->bbox.x_max - og->bbox.x_min == 0
@@ -1858,6 +1971,14 @@ static void retrieve_glyphs(ASS_Renderer *render_priv)
                 og = &glyphs[--back];
             if (og->bbox.x_max > og->cluster_advance.x)
                 og->cluster_advance.x = og->bbox.x_max;
+        }
+
+        if (vertical) {
+            info->cluster_advance.y += double_to_d6(info->hspacing *
+                render_priv->font_scale * info->orig_scale_y);
+            info->cluster_advance.x -=
+                (info->fax / info->scale_y * info->scale_x) * info->cluster_advance.y;
+            continue;
         }
 
         // add horizontal letter spacing
@@ -1899,6 +2020,8 @@ static void preliminary_layout(ASS_Renderer *render_priv)
 static void reorder_text(ASS_Renderer *render_priv)
 {
     TextInfo *text_info = &render_priv->text_info;
+    int vertical = render_priv->state.font->desc.vertical;
+
     FriBidiStrIndex *cmap = ass_shaper_reorder(render_priv->shaper, text_info);
     if (!cmap) {
         ass_msg(render_priv->library, MSGL_ERR, "Failed to reorder text");
@@ -1912,17 +2035,33 @@ static void reorder_text(ASS_Renderer *render_priv)
     int lineno = 1;
     double last_pen_x = 0;
     double last_fay = 0;
+    double last_pen_y = 0;
+    double last_fax = 0;
     for (int i = 0; i < text_info->length; i++) {
         GlyphInfo *info = text_info->glyphs + cmap[i];
         if (text_info->glyphs[i].linebreak) {
+            if (vertical) {
+                pen.x -= (last_fax / info->scale_y * info->scale_x) * (pen.y - last_pen_y);
+                last_pen_y = pen.y = 0;
+                pen.x -= double_to_d6(text_info->lines[lineno-1].desc);
+                pen.x -= double_to_d6(text_info->lines[lineno].asc);
+                pen.x -= double_to_d6(text_info->lines[lineno-1].lspacing);
+            } else {
+            // XXX: should be pen.y += .... ?
             pen.y -= (last_fay / info->scale_x * info->scale_y) * (pen.x - last_pen_x);
             last_pen_x = pen.x = 0;
             pen.y += double_to_d6(text_info->lines[lineno-1].desc);
             pen.y += double_to_d6(text_info->lines[lineno].asc);
-            pen.y += double_to_d6(render_priv->settings.line_spacing);
+            pen.y += double_to_d6(text_info->lines[lineno-1].lspacing);
+            }
             lineno++;
         }
-        else if (last_fay != info->fay) {
+        else if (last_fax != info->fax && vertical) {
+            pen.x -= (last_fax / info->scale_y * info->scale_x) * (pen.y - last_pen_y);
+            last_pen_y = pen.y;
+            last_fax = info->fax;
+        }
+        else if (last_fay != info->fay && !vertical) {
             pen.y -= (last_fay / info->scale_x * info->scale_y) * (pen.x - last_pen_x);
             last_pen_x = pen.x;
         }
@@ -1950,8 +2089,10 @@ static void align_lines(ASS_Renderer *render_priv, double max_text_width)
     double width = 0;
     int last_break = -1;
     int halign = render_priv->state.alignment & 3;
+    int valign = render_priv->state.alignment & 12;
     int justify = render_priv->state.justify;
     double max_width = 0;
+    int vertical= render_priv->state.font->desc.vertical;
 
     if (render_priv->state.evt_type == EVENT_HSCROLL)
         return;
@@ -1963,13 +2104,17 @@ static void align_lines(ASS_Renderer *render_priv, double max_text_width)
         }
         if (i < text_info->length && !glyphs[i].skip &&
                 glyphs[i].symbol != '\n' && glyphs[i].symbol != 0) {
-            width += d6_to_double(glyphs[i].cluster_advance.x);
+            if (vertical)
+                width += d6_to_double(glyphs[i].cluster_advance.y);
+            else
+                width += d6_to_double(glyphs[i].cluster_advance.x);
         }
     }
     for (i = 0; i <= text_info->length; ++i) {   // (text_info->length + 1) is the end of the last line
         if ((i == text_info->length) || glyphs[i].linebreak) {
             double shift = 0;
-            if (halign == HALIGN_LEFT) {    // left aligned, no action
+            if ((halign == HALIGN_LEFT && !vertical) ||
+                (valign == VALIGN_TOP && vertical)) {    // left aligned, no action
                 if (justify == ASS_JUSTIFY_RIGHT) {
                     shift = max_width - width;
                 } else if (justify == ASS_JUSTIFY_CENTER) {
@@ -1977,7 +2122,8 @@ static void align_lines(ASS_Renderer *render_priv, double max_text_width)
                 } else {
                     shift = 0;
                 }
-            } else if (halign == HALIGN_RIGHT) {    // right aligned
+            } else if ((halign == HALIGN_RIGHT && !vertical) ||
+                       (valign == VALIGN_SUB && vertical)) {    // right aligned
                 if (justify == ASS_JUSTIFY_LEFT) {
                     shift = max_text_width - max_width;
                 } else if (justify == ASS_JUSTIFY_CENTER) {
@@ -1985,7 +2131,8 @@ static void align_lines(ASS_Renderer *render_priv, double max_text_width)
                 } else {
                     shift = max_text_width - width;
                 }
-            } else if (halign == HALIGN_CENTER) {   // centered
+            } else if ((halign == HALIGN_CENTER && !vertical) ||
+                       (valign == VALIGN_CENTER && vertical)) {   // centered
                 if (justify == ASS_JUSTIFY_LEFT) {
                     shift = (max_text_width - max_width) / 2.0;
                 } else if (justify == ASS_JUSTIFY_RIGHT) {
@@ -1997,7 +2144,10 @@ static void align_lines(ASS_Renderer *render_priv, double max_text_width)
             for (j = last_break + 1; j < i; ++j) {
                 GlyphInfo *info = glyphs + j;
                 while (info) {
-                    info->pos.x += double_to_d6(shift);
+                    if (vertical)
+                        info->pos.y += double_to_d6(shift);
+                    else
+                        info->pos.x += double_to_d6(shift);
                     info = info->next;
                 }
             }
@@ -2006,7 +2156,10 @@ static void align_lines(ASS_Renderer *render_priv, double max_text_width)
         }
         if (i < text_info->length && !glyphs[i].skip &&
                 glyphs[i].symbol != '\n' && glyphs[i].symbol != 0) {
-            width += d6_to_double(glyphs[i].cluster_advance.x);
+            if (vertical)
+                width += d6_to_double(glyphs[i].cluster_advance.y);
+            else
+                width += d6_to_double(glyphs[i].cluster_advance.x);
         }
     }
 }
@@ -2391,6 +2544,7 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
     process_karaoke_effects(render_priv);
 
     int valign = render_priv->state.alignment & 12;
+    int halign = render_priv->state.alignment & 3;
 
     int MarginL =
         (event->MarginL) ? event->MarginL : render_priv->state.style->MarginL;
@@ -2403,9 +2557,19 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
     double max_text_width =
         x2scr(render_priv, render_priv->track->PlayResX - MarginR) -
         x2scr(render_priv, MarginL);
+    int vertical = render_priv->state.font->desc.vertical;
+    if (vertical) {
+        // HACK: treat margin parameters as the following,
+        //        MarginL -> MarginTop, MarginR -> MarginBottom,
+        //        MarginV -> MarginH (\an{3,6,9} : dist. from PlayResX/Right)
+        max_text_width =
+            y2scr(render_priv, render_priv->track->PlayResY - MarginR) -
+            y2scr(render_priv, MarginL);
+    }
 
     // wrap lines
-    if (render_priv->state.evt_type != EVENT_HSCROLL) {
+    if ((render_priv->state.evt_type != EVENT_HSCROLL && !vertical) ||
+        (render_priv->state.evt_type != EVENT_VSCROLL && vertical)) {
         // rearrange text in several lines
         wrap_lines_smart(render_priv, max_text_width);
     } else {
@@ -2428,10 +2592,24 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
 
     // x coordinate for everything except positioned events
     double device_x = 0;
+    double device_y = 0;
     if (render_priv->state.evt_type == EVENT_NORMAL ||
         render_priv->state.evt_type == EVENT_VSCROLL) {
-        device_x = x2scr(render_priv, MarginL);
+        if (vertical)
+            device_y = y2scr(render_priv, MarginL);
+        else
+            device_x = x2scr(render_priv, MarginL);
     } else if (render_priv->state.evt_type == EVENT_HSCROLL) {
+        if (vertical && render_priv->state.scroll_direction == SCROLL_RL)
+            device_y = y2scr(render_priv,
+                             render_priv->track->PlayResY -
+                             render_priv->state.scroll_shift);
+        else if (vertical && render_priv->state.scroll_direction == SCROLL_LR)
+            device_y = y2scr(render_priv, render_priv->state.scroll_shift)
+                        - (bbox.y_max - bbox.y_min);
+        else if (vertical)
+            ; // should not be reached
+        else
         if (render_priv->state.scroll_direction == SCROLL_RL)
             device_x =
                 x2scr(render_priv,
@@ -2444,9 +2622,23 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
     }
 
     // y coordinate for everything except positioned events
-    double device_y = 0;
     if (render_priv->state.evt_type == EVENT_NORMAL ||
         render_priv->state.evt_type == EVENT_HSCROLL) {
+        if (vertical && halign == HALIGN_LEFT)
+            device_x = x2scr_left(render_priv, MarginV) +
+                        text_info->height - text_info->lines[0].asc;
+        else if (vertical && halign == HALIGN_CENTER)
+            device_x = x2scr(render_priv, render_priv->track->PlayResX / 2.0);
+        else if (vertical) { // right (vertical)
+            double line_pos = render_priv->state.explicit ?
+                                    0 : render_priv->settings.line_position;
+            double scr_left, scr_right;
+            scr_left = x2scr_left(render_priv, 0) + text_info->height;
+            scr_right = x2scr_right(render_priv,
+                                   render_priv->track->PlayResX - MarginV);
+            device_x = scr_right + (scr_left - scr_right) * line_pos / 100.0;
+            device_x -= text_info->lines[0].asc;
+        } else
         if (valign == VALIGN_TOP) {     // toptitle
             device_y =
                 y2scr_top(render_priv,
@@ -2478,6 +2670,19 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
             }
         }
     } else if (render_priv->state.evt_type == EVENT_VSCROLL) {
+        if (vertical && render_priv->state.scroll_direction == SCROLL_TB)
+            device_x = x2scr(render_priv,
+                             render_priv->state.clip_x1 -
+                             render_priv->state.scroll_shift) + (bbox.x_max -
+                                                                 bbox.x_min);
+        else if (vertical && render_priv->state.scroll_direction == SCROLL_BT)
+            device_x = x2scr(render_priv,
+                             render_priv->state.clip_x0 +
+                             render_priv->state.scroll_shift)
+                       - text_info->lines[0].asc;
+        else if (vertical)
+            ; // should not be reached
+        else
         if (render_priv->state.scroll_direction == SCROLL_TB)
             device_y =
                 y2scr(render_priv,
@@ -2506,25 +2711,48 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
     if (render_priv->state.evt_type == EVENT_NORMAL ||
         render_priv->state.evt_type == EVENT_HSCROLL ||
         render_priv->state.evt_type == EVENT_VSCROLL) {
-        render_priv->state.clip_x0 =
-            x2scr_scaled(render_priv, render_priv->state.clip_x0);
-        render_priv->state.clip_x1 =
-            x2scr_scaled(render_priv, render_priv->state.clip_x1);
-        if (valign == VALIGN_TOP) {
-            render_priv->state.clip_y0 =
-                y2scr_top(render_priv, render_priv->state.clip_y0);
-            render_priv->state.clip_y1 =
-                y2scr_top(render_priv, render_priv->state.clip_y1);
-        } else if (valign == VALIGN_CENTER) {
+        if (vertical) {
             render_priv->state.clip_y0 =
                 y2scr(render_priv, render_priv->state.clip_y0);
             render_priv->state.clip_y1 =
                 y2scr(render_priv, render_priv->state.clip_y1);
-        } else if (valign == VALIGN_SUB) {
-            render_priv->state.clip_y0 =
-                y2scr_sub(render_priv, render_priv->state.clip_y0);
-            render_priv->state.clip_y1 =
-                y2scr_sub(render_priv, render_priv->state.clip_y1);
+            if (halign == HALIGN_LEFT) {
+                render_priv->state.clip_x0 =
+                    x2scr_left_scaled(render_priv, render_priv->state.clip_x0);
+                render_priv->state.clip_x1 =
+                    x2scr_left_scaled(render_priv, render_priv->state.clip_x1);
+            } else if (halign == HALIGN_CENTER) {
+                render_priv->state.clip_x0 =
+                    x2scr_scaled(render_priv, render_priv->state.clip_x0);
+                render_priv->state.clip_x1 =
+                    x2scr_scaled(render_priv, render_priv->state.clip_x1);
+            } else if (halign == HALIGN_RIGHT) {
+                render_priv->state.clip_x0 =
+                    x2scr_right_scaled(render_priv, render_priv->state.clip_x0);
+                render_priv->state.clip_x1 =
+                    x2scr_right_scaled(render_priv, render_priv->state.clip_x1);
+            }
+        } else {
+            render_priv->state.clip_x0 =
+                x2scr_scaled(render_priv, render_priv->state.clip_x0);
+            render_priv->state.clip_x1 =
+                x2scr_scaled(render_priv, render_priv->state.clip_x1);
+            if (valign == VALIGN_TOP) {
+                render_priv->state.clip_y0 =
+                    y2scr_top(render_priv, render_priv->state.clip_y0);
+                render_priv->state.clip_y1 =
+                    y2scr_top(render_priv, render_priv->state.clip_y1);
+            } else if (valign == VALIGN_CENTER) {
+                render_priv->state.clip_y0 =
+                    y2scr(render_priv, render_priv->state.clip_y0);
+                render_priv->state.clip_y1 =
+                    y2scr(render_priv, render_priv->state.clip_y1);
+            } else if (valign == VALIGN_SUB) {
+                render_priv->state.clip_y0 =
+                    y2scr_sub(render_priv, render_priv->state.clip_y0);
+                render_priv->state.clip_y1 =
+                    y2scr_sub(render_priv, render_priv->state.clip_y1);
+            }
         }
     } else if (render_priv->state.evt_type == EVENT_POSITIONED) {
         render_priv->state.clip_x0 =
@@ -2555,10 +2783,17 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
     render_and_combine_glyphs(render_priv, device_x, device_y);
 
     memset(event_images, 0, sizeof(*event_images));
-    event_images->top = device_y - text_info->lines[0].asc;
-    event_images->height = text_info->height;
-    event_images->left =
-        (device_x + bbox.x_min * render_priv->font_scale_x) + 0.5;
+    if (vertical) {
+        event_images->top = device_y + bbox.y_min;
+        event_images->height = bbox.y_max - bbox.y_min;
+        event_images->left =
+            (device_x + bbox.x_min * render_priv->font_scale_x) + 0.5 ;
+    } else {
+        event_images->top = device_y - text_info->lines[0].asc;
+        event_images->height = text_info->height;
+        event_images->left =
+            (device_x + bbox.x_min * render_priv->font_scale_x) + 0.5;
+    }
     event_images->width =
         (bbox.x_max - bbox.x_min) * render_priv->font_scale_x + 0.5;
     event_images->detect_collisions = render_priv->state.detect_collisions;
