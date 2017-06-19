@@ -176,6 +176,7 @@ typedef struct glyph_info {
     int border_style;
     double border_x, border_y;
     double hspacing;
+    double lspacing;
     unsigned italic;
     unsigned bold;
     int flags;
@@ -192,6 +193,7 @@ typedef struct glyph_info {
 typedef struct {
     double asc, desc;
     int offset, len;
+    double lspacing;
 } LineInfo;
 
 typedef struct {
@@ -235,6 +237,7 @@ typedef struct {
     char have_origin;           // origin is explicitly defined; if 0, get_base_point() is used
     double scale_x, scale_y;
     double hspacing;            // distance between letters, in pixels
+    double lspacing;            // distance between lines, in pixels
     int border_style;
     double border_x;            // outline width
     double border_y;

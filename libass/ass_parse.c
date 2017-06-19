@@ -885,6 +885,13 @@ char *parse_tag(ASS_Renderer *render_priv, char *p, char *end, double pwr)
         else
             val = render_priv->state.style->Encoding;
         render_priv->state.font_encoding = val;
+    } else if (tag("lsp")) {
+        double val = argtod(*args);
+        if (nargs)
+            render_priv->state.lspacing =
+                render_priv->state.lspacing * (1 - pwr) + val * pwr;
+        else
+            render_priv->state.lspacing = render_priv->settings.line_spacing;
     }
 
     return q;

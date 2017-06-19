@@ -857,6 +857,7 @@ void reset_render_context(ASS_Renderer *render_priv, ASS_Style *style)
     render_priv->state.scale_x = style->ScaleX;
     render_priv->state.scale_y = style->ScaleY;
     render_priv->state.hspacing = style->Spacing;
+    render_priv->state.lspacing = render_priv->settings.line_spacing;
     render_priv->state.be = 0;
     render_priv->state.blur = style->Blur;
     render_priv->state.shadow_x = style->Shadow;
@@ -1396,12 +1397,13 @@ get_bitmap_glyph(ASS_Renderer *render_priv, GlyphInfo *info)
  *   lines[].height
  *   lines[].asc
  *   lines[].desc
+ *   lines[].lspacing
  */
 static void measure_text(ASS_Renderer *render_priv)
 {
     TextInfo *text_info = &render_priv->text_info;
     int cur_line = 0;
-    double max_asc = 0., max_desc = 0.;
+    double max_asc = 0., max_desc = 0., last_lsp = 0;
     GlyphInfo *last = NULL;
     int i;
     int empty_line = 1;
@@ -1411,12 +1413,17 @@ static void measure_text(ASS_Renderer *render_priv)
             if (empty_line && cur_line > 0 && last) {
                 max_asc = d6_to_double(last->asc) / 2.0;
                 max_desc = d6_to_double(last->desc) / 2.0;
+                last_lsp = last->lspacing * render_priv->font_scale *
+                                last->orig_scale_y / 2.0;
             }
             text_info->lines[cur_line].asc = max_asc;
             text_info->lines[cur_line].desc = max_desc;
+            text_info->lines[cur_line].lspacing = last_lsp;
             text_info->height += max_asc + max_desc;
+            if (i != text_info->length)
+                text_info->height += last_lsp;
             cur_line++;
-            max_asc = max_desc = 0.;
+            max_asc = max_desc = last_lsp = 0.;
             empty_line = 1;
         }
         if (i < text_info->length) {
@@ -1425,15 +1432,14 @@ static void measure_text(ASS_Renderer *render_priv)
                 max_asc = d6_to_double(cur->asc);
             if (d6_to_double(cur->desc) > max_desc)
                 max_desc = d6_to_double(cur->desc);
+            last_lsp = cur->lspacing *
+                            render_priv->font_scale * cur->orig_scale_y;
             if (cur->symbol != '\n' && cur->symbol != 0) {
                 empty_line = 0;
                 last = cur;
             }
         }
     }
-    text_info->height +=
-        (text_info->n_lines -
-         1) * render_priv->settings.line_spacing;
 }
 
 /**
@@ -1920,6 +1926,7 @@ static int parse_events(ASS_Renderer *render_priv, ASS_Event *event)
         info->border_x= render_priv->state.border_x;
         info->border_y = render_priv->state.border_y;
         info->hspacing = render_priv->state.hspacing;
+        info->lspacing = render_priv->state.lspacing;
         info->bold = render_priv->state.bold;
         info->italic = render_priv->state.italic;
         info->flags = render_priv->state.flags;
