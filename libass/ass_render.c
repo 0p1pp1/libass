@@ -2616,6 +2616,7 @@ ass_start_frame(ASS_Renderer *render_priv, ASS_Track *track,
     render_priv->time = now;
 
     ass_lazy_track_init(render_priv->library, render_priv->track);
+    ass_set_storage_size(render_priv, track->PlayResX, track->PlayResY);
 
     ass_shaper_set_kerning(render_priv->shaper, track->Kerning);
     ass_shaper_set_language(render_priv->shaper, track->Language);
@@ -2630,7 +2631,7 @@ ass_start_frame(ASS_Renderer *render_priv, ASS_Track *track,
                          settings_priv->frame_height;
             double sar = ((double) settings_priv->storage_width) /
                          settings_priv->storage_height;
-            par = sar / dar;
+            par = dar / sar;
         } else
             par = 1.0;
     }
