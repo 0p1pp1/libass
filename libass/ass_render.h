@@ -266,6 +266,7 @@ typedef struct {
         SCROLL_BT
     } scroll_direction;         // for EVENT_HSCROLL, EVENT_VSCROLL
     int scroll_shift;
+    int scroll_autostop;        // whether to stop scrolling at the edges
 
     // face properties
     char *family;

@@ -2728,6 +2728,7 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
 
     // determine device coordinates for text
 
+    int endpos;
     // x coordinate for everything except positioned events
     if (render_priv->state.evt_type == EVENT_NORMAL ||
         render_priv->state.evt_type == EVENT_VSCROLL) {
@@ -2736,26 +2737,47 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
         else
             device_x = x2scr(render_priv, MarginL);
     } else if (render_priv->state.evt_type == EVENT_HSCROLL) {
-        if (vertical && render_priv->state.scroll_direction == SCROLL_RL)
+        if (vertical && render_priv->state.scroll_direction == SCROLL_RL) {
             device_y = y2scr(render_priv,
                              render_priv->track->PlayResY -
                              render_priv->state.scroll_shift);
-        else if (vertical && render_priv->state.scroll_direction == SCROLL_LR)
+            endpos = FFMIN(y2scr(render_priv, render_priv->state.clip_y0),
+                           y2scr(render_priv, render_priv->state.clip_y1)
+                                - (bbox.yMax - bbox.yMin));
+            if (render_priv->state.scroll_autostop)
+                device_y = FFMAX(device_y, endpos);
+        } else if (vertical && render_priv->state.scroll_direction == SCROLL_LR) {
             device_y = y2scr(render_priv, render_priv->state.scroll_shift)
                         - (bbox.yMax - bbox.yMin);
-        else if (vertical)
+            endpos = FFMAX(y2scr(render_priv, render_priv->state.clip_y1)
+                            - (bbox.yMax - bbox.yMin),
+                           y2scr(render_priv, render_priv->state.clip_y0));
+            if (render_priv->state.scroll_autostop)
+                device_y = FFMIN(device_y, endpos);
+        } else if (vertical)
             ; // should not be reached
         else
-        if (render_priv->state.scroll_direction == SCROLL_RL)
+        if (render_priv->state.scroll_direction == SCROLL_RL) {
             device_x =
                 x2scr(render_priv,
                       render_priv->track->PlayResX -
                       render_priv->state.scroll_shift);
-        else if (render_priv->state.scroll_direction == SCROLL_LR)
+            endpos = FFMIN(x2scr(render_priv, render_priv->state.clip_x0),
+                           x2scr(render_priv, render_priv->state.clip_x1)
+                                - (bbox.xMax - bbox.xMin));
+            if (render_priv->state.scroll_autostop)
+                device_x = FFMAX(device_x, endpos);
+        } else if (render_priv->state.scroll_direction == SCROLL_LR) {
             device_x =
                 x2scr(render_priv,
                       render_priv->state.scroll_shift) - (bbox.xMax -
                                                           bbox.xMin);
+            endpos = FFMAX(x2scr(render_priv, render_priv->state.clip_x1)
+                            - (bbox.xMax - bbox.xMin),
+                           x2scr(render_priv, render_priv->state.clip_x0));
+            if (render_priv->state.scroll_autostop)
+                device_x = FFMIN(device_x, endpos);
+        }
     }
 
     // y coordinate for everything except positioned events
@@ -2807,30 +2829,53 @@ ass_render_event(ASS_Renderer *render_priv, ASS_Event *event,
             }
         }
     } else if (render_priv->state.evt_type == EVENT_VSCROLL) {
-        if (vertical && render_priv->state.scroll_direction == SCROLL_TB)
+        if (vertical && render_priv->state.scroll_direction == SCROLL_TB) {
             device_x = x2scr(render_priv,
                              render_priv->state.clip_x1 -
                              render_priv->state.scroll_shift) + (bbox.xMax -
                                                                  bbox.xMin);
-        else if (vertical && render_priv->state.scroll_direction == SCROLL_BT)
+            endpos = FFMAX(x2scr(render_priv, render_priv->state.clip_x1)
+                            - text_info->lines[0].asc,
+                           x2scr(render_priv, render_priv->state.clip_x0)
+                            + (bbox.xMax - bbox.xMin) - text_info->lines[0].asc);
+            if (render_priv->state.scroll_autostop)
+                device_x = FFMAX(device_x, endpos);
+        } else if (vertical && render_priv->state.scroll_direction == SCROLL_BT) {
             device_x = x2scr(render_priv,
                              render_priv->state.clip_x0 +
                              render_priv->state.scroll_shift)
                        - text_info->lines[0].asc;
-        else if (vertical)
+            endpos = FFMIN(x2scr(render_priv, render_priv->state.clip_x0)
+                            + (bbox.xMax - bbox.xMin) - text_info->lines[0].asc,
+                           x2scr(render_priv, render_priv->state.clip_x1)
+                            - text_info->lines[0].asc);
+            if (render_priv->state.scroll_autostop)
+                device_x = FFMIN(device_x, endpos);
+        } else if (vertical)
             ; // should not be reached
         else
-        if (render_priv->state.scroll_direction == SCROLL_TB)
+        if (render_priv->state.scroll_direction == SCROLL_TB) {
             device_y =
                 y2scr(render_priv,
                       render_priv->state.clip_y0 +
                       render_priv->state.scroll_shift) - (bbox.yMax -
                                                           bbox.yMin);
-        else if (render_priv->state.scroll_direction == SCROLL_BT)
+            endpos = FFMAX(y2scr(render_priv, render_priv->state.clip_y1)
+                            - (bbox.yMax - bbox.yMin),
+                           y2scr(render_priv, render_priv->state.clip_y0));
+            if (render_priv->state.scroll_autostop)
+                device_y = FFMIN(device_y, endpos);
+        } else if (render_priv->state.scroll_direction == SCROLL_BT) {
             device_y =
                 y2scr(render_priv,
                       render_priv->state.clip_y1 -
                       render_priv->state.scroll_shift);
+            endpos = FFMIN(y2scr(render_priv, render_priv->state.clip_y0),
+                           y2scr(render_priv, render_priv->state.clip_y1)
+                            - (bbox.yMax - bbox.yMin));
+            if (render_priv->state.scroll_autostop)
+                device_y = FFMAX(device_y, endpos);
+        }
     }
 
     // positioned events are totally different
