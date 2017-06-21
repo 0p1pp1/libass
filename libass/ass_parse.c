@@ -886,6 +886,10 @@ void apply_transition_effects(ASS_Renderer *render_priv, ASS_Event *event)
             render_priv->state.scroll_direction = SCROLL_RL;
         else                    // left-to-right
             render_priv->state.scroll_direction = SCROLL_LR;
+        if (cnt >= 3 && v[2] != 0)
+            render_priv->state.scroll_autostop = 1;
+        else
+            render_priv->state.scroll_autostop = 0;
 
         delay = v[0];
         if (delay == 0)
@@ -914,6 +918,11 @@ void apply_transition_effects(ASS_Renderer *render_priv, ASS_Event *event)
                     "Error parsing effect: '%s'", event->Effect);
             return;
         }
+        if (cnt >= 4 && v[3] != 0)
+            render_priv->state.scroll_autostop = 1;
+        else
+            render_priv->state.scroll_autostop = 0;
+
         delay = v[2];
         if (delay == 0)
             delay = 1;          // ?
