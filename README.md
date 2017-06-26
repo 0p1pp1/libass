@@ -1,3 +1,33 @@
+ISDB向けlibass
+=============
+
+ISDB-S/Tで用いられる字幕を表示するため、
+[ISDB向けFFmpeg](https://github.com/0p1pp1/ffmpeg)によって
+取り出し・デコードされた拡張ASS形式の字幕データを描画する。
+
+[ISDB向けmpv](https://github.com/0p1pp1/mpv)で
+(ISDB向けffmpegと共に)使用されている。
+
+## 本家からの変更点
+
+libass 0.13.7をベースに以下の拡張・変更を加えた。
+
+* 縦書き機能の拡張： これまでのように後で入力側で90度回転させる必要なく直接縦書きする。
+* 字幕背景の追加
+* 行間隔のスタイルオーバーライドの追加
+* スクロールの自動停止(スライドイン)の追加
+* その他本家libassでの不具合修正
+
+## フォントについて
+
+ISDB-S/Tの独自文字を表示する場合、それらの文字をサポートしたフォントが必要。
+和田研中丸ゴシックやIPAexGothicARIB等。
+ただし、これらの文字はEPGでは使用されるが字幕で使用されることは少ない。
+
+
+以下、オリジナルのREADME.md
+
+------
 [![Build status](https://api.travis-ci.org/libass/libass.png)](https://travis-ci.org/libass/libass)
 
 [![Coverity scan build status](https://scan.coverity.com/projects/3531/badge.svg)](https://scan.coverity.com/projects/3531)
